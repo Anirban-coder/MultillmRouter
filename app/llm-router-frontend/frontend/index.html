@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Relay — Multi-LLM Router</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #10161d;
+    --panel: #171f28;
+    --panel-alt: #1d2732;
+    --line: #2a3644;
+    --text: #e9eef3;
+    --text-dim: #8b98a6;
+    --text-faint: #566270;
+    --amber: #ffb020;
+    --amber-dim: #6b4d1a;
+    --red: #ff5c5c;
+    --red-dim: #5a2a2a;
+    --teal: #4fd1c5;
+    --teal-dim: #1f4744;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+  }
+
+  body {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  ::selection { background: var(--amber-dim); color: var(--text); }
+
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    width: 300px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .brand {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .brand .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--teal);
+    text-transform: uppercase;
+  }
+
+  .brand h1 {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .brand p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .chain-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+
+  /* ---------- Relay chain (signature element) ---------- */
+  .chain {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .node {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 0;
+  }
+
+  .node:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 26px;
+    width: 1px;
+    height: calc(100% - 4px);
+    background: var(--line);
+    transition: background 0.4s ease;
+  }
+
+  .node.lit:not(:last-child)::after { background: var(--amber-dim); }
+
+  .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: var(--line);
+    border: 1px solid var(--text-faint);
+    flex-shrink: 0;
+    transition: all 0.35s ease;
+    z-index: 1;
+  }
+
+  .dot.trying {
+    background: var(--amber);
+    border-color: var(--amber);
+    box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.18);
+    animation: pulse 0.9s ease-in-out infinite;
+  }
+
+  .dot.success {
+    background: var(--amber);
+    border-color: var(--amber);
+    box-shadow: 0 0 10px rgba(255, 176, 32, 0.55);
+  }
+
+  .dot.failed {
+    background: var(--red);
+    border-color: var(--red);
+  }
+
+  .dot.skipped {
+    background: var(--panel-alt);
+    border-color: var(--text-faint);
+    opacity: 0.4;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(255, 176, 32, 0.18); }
+    50% { box-shadow: 0 0 0 7px rgba(255, 176, 32, 0.08); }
+  }
+
+  .node-info { display: flex; flex-direction: column; gap: 1px; }
+
+  .node-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--text-dim);
+    transition: color 0.3s ease;
+  }
+
+  .node.lit .node-name { color: var(--text); }
+
+  .node-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .node-status.trying { color: var(--amber); }
+  .node-status.success { color: var(--amber); }
+  .node-status.failed { color: var(--red); }
+
+  .sidebar-footer {
+    margin-top: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    line-height: 1.6;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+
+  .dot-inline { color: var(--teal); }
+
+  /* ---------- Main ---------- */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    max-width: 860px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 20px 32px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .tab {
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: none;
+    border: none;
+    padding: 10px 18px 14px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s ease;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--amber); border-bottom-color: var(--amber); }
+
+  .panel { display: none; flex: 1; flex-direction: column; padding: 24px 32px 32px; overflow: hidden; }
+  .panel.active { display: flex; }
+
+  /* ---------- Chat ---------- */
+  #chat-log {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding-bottom: 16px;
+  }
+
+  .msg {
+    max-width: 78%;
+    padding: 11px 15px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+
+  .msg.user {
+    align-self: flex-end;
+    background: var(--teal-dim);
+    border: 1px solid #2b5a56;
+    color: var(--text);
+  }
+
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+  }
+
+  .msg .meta {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-faint);
+    margin-top: 6px;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 10px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+  }
+
+  input[type="text"], textarea {
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 11px 13px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+
+  input[type="text"]:focus, textarea:focus { border-color: var(--amber); }
+
+  #chat-input { flex: 1; }
+
+  button.primary {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    background: var(--amber);
+    color: #1a1200;
+    border: none;
+    border-radius: 8px;
+    padding: 0 20px;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+  }
+
+  button.primary:hover { filter: brightness(1.08); }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ---------- Job ---------- */
+  .job-form { display: flex; flex-direction: column; gap: 14px; }
+
+  label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+  }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  #job-task { resize: vertical; min-height: 54px; font-family: 'Inter', sans-serif; }
+  #job-tests { resize: vertical; min-height: 90px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }
+
+  .job-row { display: flex; gap: 14px; align-items: flex-end; }
+
+  #job-attempts {
+    width: 70px;
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 10px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .job-results {
+    margin-top: 20px;
+    flex: 1;
+    overflow-y: auto;
+    display: none;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .job-results.show { display: flex; }
+
+  .job-status-banner {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .job-status-banner.pass { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber); }
+  .job-status-banner.fail { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+
+  .attempt-timeline { display: flex; flex-direction: column; gap: 8px; }
+
+  .attempt-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    padding: 8px 12px;
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+
+  .attempt-item .badge {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .attempt-item .badge.pass { background: var(--amber); }
+  .attempt-item .badge.fail { background: var(--red); }
+
+  .attempt-item .err { color: var(--text-faint); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #job-code {
+    background: #0d1218;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #c9e6c1;
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+
+  .code-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .copy-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--text-dim);
+    padding: 5px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .copy-btn:hover { color: var(--text); border-color: var(--text-dim); }
+
+  .empty-state {
+    color: var(--text-faint);
+    font-size: 13.5px;
+    margin-top: auto;
+    margin-bottom: auto;
+    text-align: center;
+  }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+  /* ---------- Provider selector + file upload ---------- */
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  select#chat-provider, select#job-provider {
+    background: var(--panel-alt);
+    border: 1px solid var(--line);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .upload-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    background: none;
+    border: 1px dashed var(--text-faint);
+    color: var(--text-dim);
+    padding: 7px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .upload-btn:hover { border-color: var(--teal); color: var(--teal); }
+
+  .file-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .file-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--teal-dim);
+    border: 1px solid #2b5a56;
+    color: var(--teal);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+
+  .file-chip .remove {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-weight: 700;
+  }
+  .file-chip .remove:hover { color: var(--red); }
+</style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="eyebrow">Local · 127.0.0.1:8000</span>
+      <h1>Relay</h1>
+      <p>Six providers, one endpoint. When one goes dark, the next takes the call.</p>
+    </div>
+
+    <div>
+      <div class="chain-label">Route chain</div>
+      <div class="chain" id="chain"></div>
+    </div>
+
+    <div class="sidebar-footer">
+      <span class="dot-inline">●</span> live during a request<br>
+      Order matches <code>app/providers.py</code>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="tabs">
+      <button class="tab active" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="job">Code Job</button>
+    </div>
+
+    <!-- CHAT PANEL -->
+    <section class="panel active" id="panel-chat">
+      <div class="toolbar">
+        <select id="chat-provider">
+          <option value="">Auto (failover)</option>
+        </select>
+        <button class="upload-btn" id="chat-upload-btn">+ Attach files</button>
+        <input type="file" id="chat-file-input" multiple style="display:none" />
+        <div class="file-chips" id="chat-file-chips"></div>
+      </div>
+      <div id="chat-log">
+        <div class="empty-state">Send a message — Relay picks the provider, you never see the plumbing.</div>
+      </div>
+      <div class="input-row">
+        <input type="text" id="chat-input" placeholder="Ask something…" />
+        <button class="primary" id="chat-send">Send</button>
+      </div>
+    </section>
+
+    <!-- JOB PANEL -->
+    <section class="panel" id="panel-job">
+      <div class="toolbar">
+        <select id="job-provider">
+          <option value="">Auto (failover)</option>
+        </select>
+        <button class="upload-btn" id="job-upload-btn">+ Attach files</button>
+        <input type="file" id="job-file-input" multiple style="display:none" />
+        <div class="file-chips" id="job-file-chips"></div>
+      </div>
+      <div class="job-form">
+        <div class="field">
+          <label for="job-task">Task</label>
+          <textarea id="job-task" placeholder="e.g. write a function called is_palindrome that checks if a string is a palindrome, ignoring case and spaces"></textarea>
+        </div>
+        <div class="field">
+          <label for="job-tests">Pytest tests (optional — leave blank to just check the code runs)</label>
+          <textarea id="job-tests" placeholder="from solution import is_palindrome&#10;&#10;def test_palindrome():&#10;    assert is_palindrome('racecar') == True"></textarea>
+        </div>
+        <div class="job-row">
+          <div class="field">
+            <label for="job-attempts">Max tries</label>
+            <input type="text" id="job-attempts" value="5" />
+          </div>
+          <button class="primary" id="job-run">Run job</button>
+        </div>
+      </div>
+
+      <div class="job-results" id="job-results">
+        <div class="job-status-banner" id="job-banner"></div>
+        <div>
+          <div class="chain-label">Fix loop</div>
+          <div class="attempt-timeline" id="attempt-timeline"></div>
+        </div>
+        <div>
+          <div class="code-header">
+            <div class="chain-label">Final code</div>
+            <button class="copy-btn" id="copy-code">Copy</button>
+          </div>
+          <pre id="job-code"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const API = "http://127.0.0.1:8000";
+
+  // Must match the order in app/providers.py
+  const PROVIDERS = [
+    { key: "google_gemini", label: "Google · Gemini" },
+    { key: "groq",          label: "Groq" },
+    { key: "cerebras",      label: "Cerebras" },
+    { key: "openrouter",    label: "OpenRouter" },
+    { key: "nvidia_nim",    label: "NVIDIA · NIM" },
+    { key: "cloudflare",    label: "Cloudflare" },
+  ];
+
+  const chainEl = document.getElementById("chain");
+  PROVIDERS.forEach(p => {
+    const node = document.createElement("div");
+    node.className = "node";
+    node.id = `node-${p.key}`;
+    node.innerHTML = `
+      <div class="dot" id="dot-${p.key}"></div>
+      <div class="node-info">
+        <span class="node-name">${p.label}</span>
+        <span class="node-status" id="status-${p.key}">idle</span>
+      </div>`;
+    chainEl.appendChild(node);
+  });
+
+  function resetChain() {
+    PROVIDERS.forEach(p => {
+      const dot = document.getElementById(`dot-${p.key}`);
+      const status = document.getElementById(`status-${p.key}`);
+      const node = document.getElementById(`node-${p.key}`);
+      dot.className = "dot";
+      status.className = "node-status";
+      status.textContent = "idle";
+      node.classList.remove("lit");
+    });
+  }
+
+  // Fill both provider dropdowns from the same PROVIDERS list
+  ["chat-provider", "job-provider"].forEach(id => {
+    const select = document.getElementById(id);
+    PROVIDERS.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.key;
+      opt.textContent = p.label;
+      select.appendChild(opt);
+    });
+  });
+
+  // ---------------- File uploads (shared logic for chat + job) ----------------
+  function setupUploader(uploadBtnId, fileInputId, chipsContainerId) {
+    const btn = document.getElementById(uploadBtnId);
+    const input = document.getElementById(fileInputId);
+    const chips = document.getElementById(chipsContainerId);
+    const uploadedIds = []; // list of {file_id, filename}
+
+    btn.addEventListener("click", () => input.click());
+
+    input.addEventListener("change", async () => {
+      const files = Array.from(input.files);
+      if (!files.length) return;
+
+      const formData = new FormData();
+      files.forEach(f => formData.append("files", f));
+
+      btn.textContent = "Uploading…";
+      btn.disabled = true;
+      try {
+        const res = await fetch(`${API}/upload`, { method: "POST", body: formData });
+        const data = await res.json();
+        data.files.forEach(f => {
+          uploadedIds.push(f);
+          const chip = document.createElement("div");
+          chip.className = "file-chip";
+          chip.innerHTML = `<span>${f.filename}</span><span class="remove" data-id="${f.file_id}">×</span>`;
+          chip.querySelector(".remove").addEventListener("click", () => {
+            const idx = uploadedIds.findIndex(u => u.file_id === f.file_id);
+            if (idx > -1) uploadedIds.splice(idx, 1);
+            chip.remove();
+          });
+          chips.appendChild(chip);
+        });
+      } catch (e) {
+        alert("Upload failed — is the server running?");
+      } finally {
+        btn.textContent = "+ Attach files";
+        btn.disabled = false;
+        input.value = "";
+      }
+    });
+
+    return { getIds: () => uploadedIds.map(u => u.file_id) };
+  }
+
+  const chatUploader = setupUploader("chat-upload-btn", "chat-file-input", "chat-file-chips");
+  const jobUploader = setupUploader("job-upload-btn", "job-file-input", "job-file-chips");
+
+  function setNode(key, state) {
+    const dot = document.getElementById(`dot-${key}`);
+    const status = document.getElementById(`status-${key}`);
+    const node = document.getElementById(`node-${key}`);
+    if (!dot) return;
+    dot.className = `dot ${state}`;
+    status.className = `node-status ${state}`;
+    status.textContent = state === "trying" ? "trying…" : state;
+    if (state !== "skipped") node.classList.add("lit");
+  }
+
+  // Animate through a server-returned attempts[] list (used by /chat)
+  async function animateAttempts(attempts) {
+    for (const a of attempts) {
+      if (a.status === "skipped_no_key") { setNode(a.provider, "skipped"); continue; }
+      setNode(a.provider, "trying");
+      await new Promise(r => setTimeout(r, 260));
+      if (a.status === "success") setNode(a.provider, "success");
+      else setNode(a.provider, "failed");
+    }
+  }
+
+  // ---------------- Tabs ----------------
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById(`panel-${tab.dataset.tab}`).classList.add("active");
+    });
+  });
+
+  // ---------------- Chat ----------------
+  const chatLog = document.getElementById("chat-log");
+  const chatInput = document.getElementById("chat-input");
+  const chatSend = document.getElementById("chat-send");
+  const SESSION_ID = "web-" + Math.random().toString(36).slice(2, 9);
+  let chatStarted = false;
+
+  function addMsg(role, text, meta) {
+    if (!chatStarted) { chatLog.innerHTML = ""; chatStarted = true; }
+    const div = document.createElement("div");
+    div.className = `msg ${role}`;
+    div.textContent = text;
+    if (meta) {
+      const m = document.createElement("span");
+      m.className = "meta";
+      m.textContent = meta;
+      div.appendChild(m);
+    }
+    chatLog.appendChild(div);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  async function sendChat() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    addMsg("user", text);
+    chatInput.value = "";
+    chatSend.disabled = true;
+    resetChain();
+
+    try {
+      const selectedProvider = document.getElementById("chat-provider").value;
+      const res = await fetch(`${API}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: SESSION_ID,
+          message: text,
+          provider: selectedProvider || null,
+          file_ids: chatUploader.getIds(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addMsg("assistant", `Every provider failed. Check your .env keys.\n${data.detail || ""}`);
+        return;
+      }
+      await animateAttempts(data.attempts);
+      addMsg("assistant", data.reply, `via ${data.provider_used}`);
+    } catch (e) {
+      addMsg("assistant", `Couldn't reach the server. Is uvicorn running on ${API}?`);
+    } finally {
+      chatSend.disabled = false;
+    }
+  }
+
+  chatSend.addEventListener("click", sendChat);
+  chatInput.addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+
+  // ---------------- Job ----------------
+  const jobRun = document.getElementById("job-run");
+  const jobResults = document.getElementById("job-results");
+  const jobBanner = document.getElementById("job-banner");
+  const timeline = document.getElementById("attempt-timeline");
+  const jobCode = document.getElementById("job-code");
+
+  async function runJob() {
+    const task = document.getElementById("job-task").value.trim();
+    const tests = document.getElementById("job-tests").value.trim();
+    const maxAttempts = parseInt(document.getElementById("job-attempts").value, 10) || 5;
+    if (!task) return;
+
+    jobRun.disabled = true;
+    jobRun.textContent = "Running…";
+    jobResults.classList.remove("show");
+    resetChain();
+
+    try {
+      const selectedProvider = document.getElementById("job-provider").value;
+      const res = await fetch(`${API}/job`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task,
+          tests: tests || null,
+          max_attempts: maxAttempts,
+          provider: selectedProvider || null,
+          file_ids: jobUploader.getIds(),
+        }),
+      });
+      const data = await res.json();
+
+      jobBanner.className = `job-status-banner ${data.success ? "pass" : "fail"}`;
+      jobBanner.textContent = data.success
+        ? `Passed on attempt ${data.attempts_used} of ${maxAttempts} — ${data.final_provider}`
+        : `Gave up after ${data.attempts_used} attempts`;
+
+      timeline.innerHTML = "";
+      data.attempt_log.forEach(a => {
+        const row = document.createElement("div");
+        row.className = "attempt-item";
+        row.innerHTML = `
+          <span class="badge ${a.passed ? "pass" : "fail"}"></span>
+          <span>#${a.attempt}</span>
+          <span>${a.provider}</span>
+          <span class="err">${a.error ? a.error.split("\n")[0] : "passed"}</span>`;
+        timeline.appendChild(row);
+        setNode(a.provider, a.passed ? "success" : "failed");
+      });
+
+      jobCode.textContent = data.code || "(no code returned)";
+      jobResults.classList.add("show");
+    } catch (e) {
+      jobBanner.className = "job-status-banner fail";
+      jobBanner.textContent = `Couldn't reach the server. Is uvicorn running on ${API}?`;
+      jobResults.classList.add("show");
+    } finally {
+      jobRun.disabled = false;
+      jobRun.textContent = "Run job";
+    }
+  }
+
+  jobRun.addEventListener("click", runJob);
+
+  document.getElementById("copy-code").addEventListener("click", () => {
+    navigator.clipboard.writeText(jobCode.textContent);
+    const btn = document.getElementById("copy-code");
+    btn.textContent = "Copied";
+    setTimeout(() => (btn.textContent = "Copy"), 1200);
+  });
+</script>
+</body>
+</html>
